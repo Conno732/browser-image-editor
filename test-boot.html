@@ -79,7 +79,7 @@ window.onerror = function (msg, src, line, col) {
   };
 
   check("doc created", () => Editor.doc && Editor.doc.width === 1280 && Editor.doc.layers.length === 1);
-  check("toolbar built", () => document.querySelectorAll(".tool-btn").length === 11);
+  check("toolbar built", () => document.querySelectorAll(".tool-btn").length === 14);
   check("menus built", () => document.querySelectorAll(".menu").length === 7);
   check("add layer", () => { Editor.addLayer(); return Editor.doc.layers.length === 2; });
   check("brush stroke", () => {
@@ -151,6 +151,100 @@ window.onerror = function (msg, src, line, col) {
   check("text layer", () => {
     Editor.addTextLayer({ x: 20, y: 100 }, { text: "Hi", size: 48, family: "Arial", color: "#000000", bold: false, italic: false });
     return Editor.doc.layers.length === 2 && Editor.activeLayer().name === "Hi";
+  });
+  check("smudge smears pixels", () => {
+    Editor.doc.active = 0;
+    const l = Editor.activeLayer();
+    l.ctx.fillStyle = "#000"; l.ctx.fillRect(0, 0, 100, Editor.doc.height);
+    l.ctx.fillStyle = "#fff"; l.ctx.fillRect(100, 0, Editor.doc.width - 100, Editor.doc.height);
+    Tools.set("smudge"); Tools.opts.size = 30; Tools.opts.strength = 80;
+    Tools.down({ x: 80, y: 150 }, {});
+    Tools.move({ x: 130, y: 150 }, {});
+    Tools.up({ x: 130, y: 150 }, {});
+    const d = l.ctx.getImageData(110, 150, 1, 1).data;
+    if (!(d[0] < 250)) throw new Error("smudge val=" + d[0] + " a=" + d[3]);
+    return true;
+  });
+  check("dodge lightens", () => {
+    const l = Editor.activeLayer();
+    l.ctx.fillStyle = "#808080"; l.ctx.fillRect(0, 0, Editor.doc.width, Editor.doc.height);
+    Tools.set("dodge"); Tools.opts.dodgeMode = "dodge"; Tools.opts.size = 40; Tools.opts.exposure = 50;
+    Tools.down({ x: 50, y: 50 }, {});
+    Tools.move({ x: 150, y: 50 }, {});
+    Tools.up({ x: 150, y: 50 }, {});
+    const d = l.ctx.getImageData(100, 50, 1, 1).data;
+    return d[0] > 130;
+  });
+  check("burn darkens", () => {
+    const l = Editor.activeLayer();
+    Tools.opts.dodgeMode = "burn";
+    Tools.down({ x: 50, y: 150 }, {});
+    Tools.move({ x: 150, y: 150 }, {});
+    Tools.up({ x: 150, y: 150 }, {});
+    const d = l.ctx.getImageData(100, 150, 1, 1).data;
+    if (!(d[0] < 126)) throw new Error("burn val=" + d[0] + "," + d[1] + "," + d[2] + " a=" + d[3]);
+    return true;
+  });
+  check("blur brush", () => {
+    const l = Editor.activeLayer();
+    l.ctx.fillStyle = "#000"; l.ctx.fillRect(0, 100, Editor.doc.width, 4);
+    Tools.set("blur"); Tools.opts.size = 40; Tools.opts.strength = 80;
+    Tools.down({ x: 100, y: 102 }, {});
+    Tools.move({ x: 120, y: 102 }, {});
+    Tools.up({ x: 120, y: 102 }, {});
+    const d = l.ctx.getImageData(110, 102, 1, 1).data;
+    return d[0] > 5;
+  });
+  check("context menu builds", () => {
+    UI.openContextMenu(100, 100);
+    const n = document.querySelectorAll(".context-menu .menu-item").length;
+    UI.closeContextMenu();
+    return n >= 9 && document.querySelectorAll(".context-menu").length === 0;
+  });
+  check("fill selection", () => {
+    const l = Editor.activeLayer();
+    Editor.selection = { x: 10, y: 10, w: 30, h: 30 };
+    Tools.color = "#0000ff";
+    UI.fillSelection();
+    const d = l.ctx.getImageData(20, 20, 1, 1).data;
+    Editor.deselect();
+    return d[2] === 255;
+  });
+  check("levels filter", () => {
+    const img = new ImageData(4, 4);
+    img.data.fill(128);
+    Filters.defs["levels"].fn(img, { black: 0, white: 128, gamma: 100 });
+    return img.data[0] === 255;
+  });
+  check("gradient map", () => {
+    const img = new ImageData(2, 2);
+    for (let i = 0; i < img.data.length; i += 4) { img.data[i] = img.data[i+1] = img.data[i+2] = 255; img.data[i+3] = 255; }
+    Filters.defs["gradient-map"].fn(img, { shadow: "#000000", highlight: "#ff0000", mix: 100 });
+    return img.data[0] === 255 && img.data[1] === 0;
+  });
+  check("motion blur", () => {
+    const img = new ImageData(20, 1);
+    for (let i = 0; i < 20; i++) img.data[i * 4 + 3] = 255;
+    img.data[10 * 4] = 255;
+    const out = Filters.defs["motion-blur"].fn(img, { distance: 6, angle: 0 });
+    return out.data[8 * 4] > 0 && out.data[12 * 4] > 0;
+  });
+  check("twirl runs", () => {
+    const img = new ImageData(20, 20);
+    Filters.defs["twirl"].fn(img, { angle: 180, radius: 90 });
+    return true;
+  });
+  check("glow runs", () => {
+    const img = new ImageData(10, 10);
+    for (let i = 0; i < img.data.length; i += 4) { img.data[i] = 100; img.data[i+3] = 255; }
+    Filters.defs["glow"].fn(img, { radius: 3, intensity: 100 });
+    return img.data[0] > 100;
+  });
+  check("solarize + auto-contrast run", () => {
+    const l = Editor.activeLayer();
+    Filters.applyDirect("solarize");
+    Filters.applyDirect("auto-contrast");
+    return true;
   });
 
   const div = document.createElement("div");

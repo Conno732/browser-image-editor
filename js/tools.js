@@ -11,7 +11,11 @@ const Tools = {
     shape: "rectangle",   // rectangle | ellipse | line
     shapeMode: "fill",    // fill | outline
     strokeWidth: 4,
+    strength: 60,         // smudge / blur
+    exposure: 30,         // dodge / burn
+    dodgeMode: "dodge",   // dodge | burn
   },
+  brushLike: ["brush", "eraser", "clone", "smudge", "blur", "dodge"],
   cloneSource: null,      // doc coords
   cropRect: null,         // doc coords, pending crop
   state: {},              // per-gesture scratch
@@ -44,6 +48,7 @@ const Tools = {
     const map = {
       move: "move", hand: "grab", text: "text",
       brush: "none", eraser: "none", clone: "none",
+      smudge: "none", blur: "none", dodge: "none",
       eyedropper: "crosshair", fill: "crosshair",
       select: "crosshair", crop: "crosshair", shape: "crosshair",
     };
@@ -362,6 +367,169 @@ const Tools = {
       },
     },
 
+    smudge: {
+      hint: "Drag to smear pixels. Strength controls how far color carries.",
+      down(p) {
+        const layer = Editor.activeLayer();
+        if (!layer || !layer.visible) return;
+        History.record("Smudge");
+        const local = Tools._local(p, layer);
+        Tools.state = { layer, last: local, painting: true };
+        Tools.defs.smudge._capture(local);
+      },
+      // Grab a round stamp of pixels under the point; dragging repeatedly
+      // deposits and re-grabs it, which smears color along the path.
+      _capture(pt) {
+        const s = Tools.state;
+        const size = Math.max(2, Tools.opts.size);
+        if (!s.stamp || s.stamp.width !== size) s.stamp = Utils.createCanvas(size, size);
+        const sctx = s.stamp.getContext("2d");
+        sctx.save();
+        sctx.clearRect(0, 0, size, size);
+        sctx.drawImage(s.layer.canvas, pt.x - size / 2, pt.y - size / 2, size, size, 0, 0, size, size);
+        sctx.globalCompositeOperation = "destination-in";
+        sctx.beginPath();
+        sctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        sctx.fill();
+        sctx.restore();
+      },
+      move(p) {
+        const s = Tools.state;
+        if (!s.painting) return;
+        const layer = s.layer;
+        const cur = Tools._local(p, layer);
+        const size = Math.max(2, Tools.opts.size);
+        const dx = cur.x - s.last.x, dy = cur.y - s.last.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const step = Math.max(1, size / 6);
+        if (dist < step) return;
+        const alpha = Utils.clamp(Tools.opts.strength / 100 * 0.9, 0.05, 0.95);
+        const ctx = layer.ctx;
+        let q = s.last;
+        for (let t = step; t <= dist; t += step) {
+          q = { x: s.last.x + dx * t / dist, y: s.last.y + dy * t / dist };
+          ctx.save();
+          Tools._clipSelection(ctx, layer);
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(s.stamp, q.x - size / 2, q.y - size / 2);
+          ctx.restore();
+          Tools.defs.smudge._capture(q);
+        }
+        s.last = q;
+        Editor.render();
+      },
+      up() {
+        if (Tools.state.painting) { UI.refreshLayers(); Editor.render(); }
+        Tools.state = {};
+      },
+    },
+
+    blur: {
+      hint: "Paint to blur. Strength sets the blur radius.",
+      down(p) {
+        const layer = Editor.activeLayer();
+        if (!layer || !layer.visible) return;
+        History.record("Blur brush");
+        const blurred = Utils.createCanvas(layer.canvas.width, layer.canvas.height);
+        const bctx = blurred.getContext("2d");
+        bctx.filter = `blur(${Math.max(0.5, Tools.opts.strength / 10).toFixed(1)}px)`;
+        bctx.drawImage(layer.canvas, 0, 0);
+        const local = Tools._local(p, layer);
+        Tools.state = { layer, blurred, last: local, painting: true };
+        Tools.defs.blur._stamp(local);
+        Editor.render();
+      },
+      _stamp(pt) {
+        const s = Tools.state;
+        const ctx = s.layer.ctx;
+        ctx.save();
+        Tools._clipSelection(ctx, s.layer);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, Tools.opts.size / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(s.blurred, 0, 0);
+        ctx.restore();
+      },
+      move(p) {
+        const s = Tools.state;
+        if (!s.painting) return;
+        const cur = Tools._local(p, s.layer);
+        const dx = cur.x - s.last.x, dy = cur.y - s.last.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const step = Math.max(1, Tools.opts.size / 4);
+        for (let t = step; t <= dist; t += step) {
+          Tools.defs.blur._stamp({ x: s.last.x + dx * t / dist, y: s.last.y + dy * t / dist });
+        }
+        Tools.defs.blur._stamp(cur);
+        s.last = cur;
+        Editor.render();
+      },
+      up() {
+        if (Tools.state.painting) { UI.refreshLayers(); Editor.render(); }
+        Tools.state = {};
+      },
+    },
+
+    dodge: {
+      hint: "Drag to lighten (dodge), darken (burn), or desaturate (sponge).",
+      down(p) {
+        if (!Tools._startStroke(p, "Dodge/Burn")) return;
+        Tools.defs.dodge._redraw();
+      },
+      move(p) {
+        const s = Tools.state;
+        if (!s.painting) return;
+        s.points.push(Tools._local(p, s.layer));
+        Tools.defs.dodge._redraw();
+      },
+      up() {
+        if (Tools.state.painting) UI.refreshLayers();
+        Tools.state = {};
+      },
+      // Stroke onto a copy of the layer with a lighten/darken blend mode, mask
+      // the copy back to the layer's original alpha (blend modes paint onto
+      // transparent pixels otherwise), then commit the copy.
+      _redraw() {
+        const s = Tools.state, layer = s.layer;
+        const temp = Utils.cloneCanvas(s.snapshot);
+        const tctx = temp.getContext("2d");
+        const mode = Tools.opts.dodgeMode;
+        if (mode === "sponge") {
+          tctx.globalCompositeOperation = "saturation";
+          tctx.strokeStyle = "#808080";
+          tctx.globalAlpha = Tools.opts.exposure / 100;
+        } else {
+          const g = mode === "dodge"
+            ? Math.round(Tools.opts.exposure * 2)
+            : 255 - Math.round(Tools.opts.exposure * 2);
+          tctx.globalCompositeOperation = mode === "dodge" ? "color-dodge" : "color-burn";
+          tctx.strokeStyle = `rgb(${g},${g},${g})`;
+        }
+        tctx.lineWidth = Tools.opts.size;
+        tctx.lineCap = "round";
+        tctx.lineJoin = "round";
+        const pts = s.points;
+        tctx.beginPath();
+        tctx.moveTo(pts[0].x, pts[0].y);
+        if (pts.length === 1) tctx.lineTo(pts[0].x + 0.01, pts[0].y);
+        else for (let i = 1; i < pts.length; i++) tctx.lineTo(pts[i].x, pts[i].y);
+        tctx.stroke();
+        tctx.globalAlpha = 1;
+        tctx.globalCompositeOperation = "destination-in";
+        tctx.drawImage(s.snapshot, 0, 0);
+
+        const ctx = layer.ctx;
+        ctx.save();
+        ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+        ctx.drawImage(s.snapshot, 0, 0);
+        Tools._clipSelection(ctx, layer);
+        ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+        ctx.drawImage(temp, 0, 0);
+        ctx.restore();
+        Editor.render();
+      },
+    },
+
     hand: {
       hint: "Drag to pan. Mouse wheel zooms.",
       down(p, e) {
@@ -428,7 +596,7 @@ const Tools = {
     }
 
     // brush size cursor
-    if (["brush", "eraser", "clone"].includes(this.current) && Editor.pointer.over) {
+    if (this.brushLike.includes(this.current) && Editor.pointer.over) {
       const radius = (this.opts.size / 2) * Editor.view.zoom;
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(0,0,0,.8)";

@@ -15,14 +15,18 @@ const UI = {
     text: '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>',
     shape: '<rect x="3" y="3" width="10" height="10"/><circle cx="15.5" cy="15.5" r="5.5"/>',
     clone: '<rect x="5" y="11" width="14" height="8" rx="1"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+    smudge: '<path d="M4 18c3 0 4-2 5-5s2-6 6-6c3 0 5 2 5 5"/><circle cx="5" cy="18" r="2"/>',
+    blur: '<path d="M12 3c3.5 4.5 6 7.8 6 10.5a6 6 0 11-12 0C6 10.8 8.5 7.5 12 3z"/>',
+    dodge: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
     hand: '<path d="M8 12V6a1.5 1.5 0 013 0v5V4.5a1.5 1.5 0 013 0V11V7a1.5 1.5 0 013 0v6.5l1.5-1.5a1.5 1.5 0 012 2L17 18c-1 1.7-2.5 2.5-4.5 2.5S8.5 19 8 17z"/>',
   },
 
-  toolOrder: ["move", "select", "crop", "brush", "eraser", "fill", "eyedropper", "text", "shape", "clone", "hand"],
+  toolOrder: ["move", "select", "crop", "brush", "eraser", "fill", "smudge", "blur", "dodge", "eyedropper", "text", "shape", "clone", "hand"],
   toolNames: {
     move: "Move (V)", select: "Select (M)", crop: "Crop (C)", brush: "Brush (B)",
     eraser: "Eraser (E)", fill: "Fill (G)", eyedropper: "Eyedropper (I)",
     text: "Text (T)", shape: "Shape (U)", clone: "Clone Stamp (S)", hand: "Hand (H)",
+    smudge: "Smudge (K)", blur: "Blur (R)", dodge: "Dodge / Burn / Sponge (O)",
   },
 
   init() {
@@ -81,25 +85,32 @@ const UI = {
       ]},
       { label: "Adjust", items: [
         { label: "Brightness / Contrast…", action: () => UI.openFilterDialog("brightness-contrast") },
+        { label: "Levels…", action: () => UI.openFilterDialog("levels") },
         { label: "Hue / Saturation…", action: () => UI.openFilterDialog("hue-saturation") },
         { label: "Temperature / Tint…", action: () => UI.openFilterDialog("temperature") },
         { label: "Exposure / Gamma…", action: () => UI.openFilterDialog("exposure") },
         { label: "Vibrance…", action: () => UI.openFilterDialog("vibrance") },
+        { label: "Auto Contrast", action: () => Filters.applyDirect("auto-contrast") },
         { sep: true },
         { label: "Invert", shortcut: "Ctrl+I", action: () => Filters.applyDirect("invert") },
         { label: "Grayscale", action: () => Filters.applyDirect("grayscale") },
         { label: "Sepia", action: () => Filters.applyDirect("sepia") },
+        { label: "Solarize", action: () => Filters.applyDirect("solarize") },
+        { label: "Gradient Map…", action: () => UI.openFilterDialog("gradient-map") },
         { sep: true },
         { label: "Posterize…", action: () => UI.openFilterDialog("posterize") },
         { label: "Threshold…", action: () => UI.openFilterDialog("threshold") },
       ]},
       { label: "Filter", items: [
         { label: "Gaussian Blur…", action: () => UI.openFilterDialog("blur") },
+        { label: "Motion Blur…", action: () => UI.openFilterDialog("motion-blur") },
         { label: "Sharpen…", action: () => UI.openFilterDialog("sharpen") },
+        { label: "Glow…", action: () => UI.openFilterDialog("glow") },
         { sep: true },
         { label: "Pixelate…", action: () => UI.openFilterDialog("pixelate") },
         { label: "Noise…", action: () => UI.openFilterDialog("noise") },
         { label: "Vignette…", action: () => UI.openFilterDialog("vignette") },
+        { label: "Twirl…", action: () => UI.openFilterDialog("twirl") },
         { sep: true },
         { label: "Emboss", action: () => Filters.applyDirect("emboss") },
         { label: "Edge Detect", action: () => Filters.applyDirect("edge") },
@@ -154,6 +165,74 @@ const UI = {
 
   closeMenus() {
     document.querySelectorAll(".menu.open").forEach(m => m.classList.remove("open"));
+    this.closeContextMenu();
+  },
+
+  // ---- right-click context menu ------------------------------------------
+
+  openContextMenu(clientX, clientY) {
+    this.closeContextMenu();
+    if (!Editor.doc) return;
+    const menu = document.createElement("div");
+    menu.className = "menu-drop context-menu";
+
+    const add = (label, action) => {
+      const el = document.createElement("button");
+      el.className = "menu-item";
+      el.innerHTML = `<span>${label}</span>`;
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        UI.closeContextMenu();
+        action();
+      });
+      menu.appendChild(el);
+    };
+    const sep = () => {
+      const el = document.createElement("div");
+      el.className = "menu-sep";
+      menu.appendChild(el);
+    };
+
+    if (Editor.selection) {
+      add("Deselect", () => Editor.deselect());
+      add("Fill Selection", () => UI.fillSelection());
+      add("Delete Selection", () => Editor.deleteSelectionContents());
+      add("Crop to Selection", () => Editor.cropTo(Editor.selection));
+    } else {
+      add("Select All", () => Editor.selectAll());
+    }
+    sep();
+    add("New Layer", () => Editor.addLayer());
+    add("Duplicate Layer", () => Editor.duplicateLayer());
+    add("Delete Layer", () => Editor.deleteLayer());
+    add("Merge Down", () => Editor.mergeDown());
+    sep();
+    add("Undo", () => History.undo());
+    add("Redo", () => History.redo());
+    sep();
+    add("Fit View", () => Editor.fitView());
+    add("Zoom 100%", () => Editor.setZoom(1));
+
+    document.body.appendChild(menu);
+    const x = Math.min(clientX, window.innerWidth - menu.offsetWidth - 6);
+    const y = Math.min(clientY, window.innerHeight - menu.offsetHeight - 6);
+    menu.style.left = Math.max(0, x) + "px";
+    menu.style.top = Math.max(0, y) + "px";
+  },
+
+  closeContextMenu() {
+    document.querySelectorAll(".context-menu").forEach(m => m.remove());
+  },
+
+  fillSelection() {
+    const layer = Editor.activeLayer();
+    if (!layer || !Editor.selection) return;
+    History.record("Fill selection");
+    const s = Utils.roundRect(Editor.selection);
+    layer.ctx.fillStyle = Tools.color;
+    layer.ctx.fillRect(s.x - layer.x, s.y - layer.y, s.w, s.h);
+    Editor.render();
+    UI.refreshLayers();
   },
 
   // ---- toolbar ---------------------------------------------------------------
@@ -215,6 +294,14 @@ const UI = {
       span.textContent = text;
       bar.appendChild(span);
     };
+    const addButton = (text, fn, primary) => {
+      const btn = document.createElement("button");
+      if (primary) btn.className = "primary";
+      btn.textContent = text;
+      btn.addEventListener("click", fn);
+      bar.appendChild(btn);
+      return btn;
+    };
 
     if (t === "brush") {
       addColor();
@@ -238,22 +325,27 @@ const UI = {
       addSlider("Size", "size", 1, 300);
       addSlider("Opacity", "opacity", 1, 100);
       addHint("Alt+click sets the source point");
+    } else if (t === "smudge") {
+      addSlider("Size", "size", 1, 300);
+      addSlider("Strength", "strength", 1, 100);
+    } else if (t === "blur") {
+      addSlider("Size", "size", 1, 300);
+      addSlider("Strength", "strength", 1, 100);
+    } else if (t === "dodge") {
+      addSelect("Mode", "dodgeMode", [["dodge", "Dodge (lighten)"], ["burn", "Burn (darken)"], ["sponge", "Sponge (desaturate)"]]);
+      addSlider("Size", "size", 1, 300);
+      addSlider("Exposure", "exposure", 1, 100);
     } else if (t === "crop") {
-      const apply = document.createElement("button");
-      apply.className = "primary";
-      apply.textContent = "Apply Crop";
+      const apply = addButton("Apply Crop", () => Tools.applyCrop(), true);
       apply.disabled = !Tools.cropRect;
-      apply.addEventListener("click", () => Tools.applyCrop());
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", () => Tools.cancelCrop());
-      bar.appendChild(apply);
-      bar.appendChild(cancel);
+      addButton("Cancel", () => Tools.cancelCrop());
       if (Tools.cropRect) addHint(`${Math.round(Tools.cropRect.w)} × ${Math.round(Tools.cropRect.h)} px — Enter to apply`);
       else addHint("Drag on the canvas to frame the crop");
     } else if (t === "text") {
       addHint("Click on the canvas to place text");
     } else if (t === "select") {
+      addButton("Deselect", () => Editor.deselect());
+      addButton("Select All", () => Editor.selectAll());
       addHint("Drag to select — filters and fills respect the selection");
     } else if (t === "eyedropper") {
       addColor();
@@ -609,16 +701,24 @@ const UI = {
     for (const p of def.params) {
       const row = document.createElement("div");
       row.className = "filter-param";
-      row.innerHTML = `<span class="lbl">${p.label}</span>
-        <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.v}">
-        <span class="val">${p.v}</span>`;
-      const input = row.querySelector("input");
-      const val = row.querySelector(".val");
-      input.addEventListener("input", () => {
-        values[p.k] = +input.value;
-        val.textContent = input.value;
-        preview();
-      });
+      if (p.type === "color") {
+        row.innerHTML = `<span class="lbl">${p.label}</span><input type="color" value="${p.v}">`;
+        row.querySelector("input").addEventListener("input", (e) => {
+          values[p.k] = e.target.value;
+          preview();
+        });
+      } else {
+        row.innerHTML = `<span class="lbl">${p.label}</span>
+          <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.v}">
+          <span class="val">${p.v}</span>`;
+        const input = row.querySelector("input");
+        const val = row.querySelector(".val");
+        input.addEventListener("input", () => {
+          values[p.k] = +input.value;
+          val.textContent = input.value;
+          preview();
+        });
+      }
       paramsEl.appendChild(row);
     }
 

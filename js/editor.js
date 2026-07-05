@@ -312,6 +312,7 @@ const Editor = {
       ctx.translate(nw / 2, nh / 2);
       ctx.rotate(deg * Math.PI / 180);
       ctx.drawImage(layer.canvas, -w / 2, -h / 2);
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // the context persists on the layer — leave no transform behind
       layer.canvas = c;
       layer.ctx = c.getContext("2d", { willReadFrequently: true });
     }
@@ -333,6 +334,7 @@ const Editor = {
       if (axis === "h") { ctx.translate(w, 0); ctx.scale(-1, 1); }
       else { ctx.translate(0, h); ctx.scale(1, -1); }
       ctx.drawImage(layer.canvas, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0); // the context persists on the layer — leave no transform behind
       layer.canvas = c;
       layer.ctx = c.getContext("2d", { willReadFrequently: true });
     }

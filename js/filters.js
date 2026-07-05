@@ -75,6 +75,35 @@ const Filters = {
     edge(img) {
       return Filters.sobel(img);
     },
+    solarize(img) {
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 128) d[i] = 255 - d[i];
+        if (d[i + 1] > 128) d[i + 1] = 255 - d[i + 1];
+        if (d[i + 2] > 128) d[i + 2] = 255 - d[i + 2];
+      }
+    },
+    // Stretch luminance to full range, clipping 0.5% at each end.
+    "auto-contrast"(img) {
+      const d = img.data;
+      const hist = new Uint32Array(256);
+      let count = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] === 0) continue;
+        hist[Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])]++;
+        count++;
+      }
+      if (!count) return;
+      const clip = count * 0.005;
+      let lo = 0, hi = 255, acc = 0;
+      for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc > clip) { lo = i; break; } }
+      acc = 0;
+      for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc > clip) { hi = i; break; } }
+      if (hi <= lo) return;
+      const lut = new Uint8ClampedArray(256);
+      for (let i = 0; i < 256; i++) lut[i] = Utils.clamp((i - lo) * 255 / (hi - lo), 0, 255);
+      Filters.applyLUT(img, lut);
+    },
   },
 
   // ---- convolution -----------------------------------------------------
@@ -409,6 +438,145 @@ const Filters = {
           d[i] = Utils.clamp(d[i] + n, 0, 255);
           d[i + 1] = Utils.clamp(d[i + 1] + n, 0, 255);
           d[i + 2] = Utils.clamp(d[i + 2] + n, 0, 255);
+        }
+        return img;
+      },
+    },
+
+    "levels": {
+      title: "Levels",
+      params: [
+        { k: "black", label: "Black point", min: 0, max: 254, step: 1, v: 0 },
+        { k: "white", label: "White point", min: 1, max: 255, step: 1, v: 255 },
+        { k: "gamma", label: "Midtones", min: 10, max: 300, step: 1, v: 100 }, // /100
+      ],
+      fn(img, v) {
+        const black = Math.min(v.black, v.white - 1);
+        const range = v.white - black;
+        const gamma = 1 / (v.gamma / 100);
+        const lut = new Uint8ClampedArray(256);
+        for (let i = 0; i < 256; i++) {
+          const t = Utils.clamp((i - black) / range, 0, 1);
+          lut[i] = Math.round(255 * Math.pow(t, gamma));
+        }
+        return Filters.applyLUT(img, lut);
+      },
+    },
+
+    "gradient-map": {
+      title: "Gradient Map",
+      params: [
+        { k: "shadow", label: "Shadows", type: "color", v: "#101040" },
+        { k: "highlight", label: "Highlights", type: "color", v: "#ffe0a0" },
+        { k: "mix", label: "Mix", min: 0, max: 100, step: 1, v: 100 },
+      ],
+      fn(img, v) {
+        const lo = Utils.hexToRgb(v.shadow);
+        const hi = Utils.hexToRgb(v.highlight);
+        const mix = v.mix / 100;
+        const d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const t = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+          d[i] = d[i] + (lo.r + (hi.r - lo.r) * t - d[i]) * mix;
+          d[i + 1] = d[i + 1] + (lo.g + (hi.g - lo.g) * t - d[i + 1]) * mix;
+          d[i + 2] = d[i + 2] + (lo.b + (hi.b - lo.b) * t - d[i + 2]) * mix;
+        }
+        return img;
+      },
+    },
+
+    "glow": {
+      title: "Glow",
+      params: [
+        { k: "radius", label: "Radius", min: 1, max: 40, step: 1, v: 10 },
+        { k: "intensity", label: "Intensity", min: 1, max: 100, step: 1, v: 50 },
+      ],
+      // Screen-blend a blurred copy over the original (soft bloom).
+      fn(img, v) {
+        const blurred = new ImageData(new Uint8ClampedArray(img.data), img.width, img.height);
+        Filters.gaussianBlur(blurred, v.radius);
+        const d = img.data, b = blurred.data;
+        const mix = v.intensity / 100;
+        for (let i = 0; i < d.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            const screen = 255 - (255 - d[i + c]) * (255 - b[i + c]) / 255;
+            d[i + c] += (screen - d[i + c]) * mix;
+          }
+        }
+        return img;
+      },
+    },
+
+    "motion-blur": {
+      title: "Motion Blur",
+      params: [
+        { k: "distance", label: "Distance", min: 2, max: 60, step: 1, v: 15 },
+        { k: "angle", label: "Angle", min: -90, max: 90, step: 1, v: 0 },
+      ],
+      fn(img, v) {
+        const w = img.width, h = img.height, src = img.data;
+        const out = new ImageData(w, h);
+        const dst = out.data;
+        const rad = v.angle * Math.PI / 180;
+        const dx = Math.cos(rad), dy = Math.sin(rad);
+        const half = v.distance / 2;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            let r = 0, g = 0, b = 0, a = 0, n = 0;
+            for (let t = -half; t <= half; t++) {
+              const sx = Utils.clamp(Math.round(x + dx * t), 0, w - 1);
+              const sy = Utils.clamp(Math.round(y + dy * t), 0, h - 1);
+              const i = (sy * w + sx) * 4;
+              const al = src[i + 3] / 255;
+              r += src[i] * al; g += src[i + 1] * al; b += src[i + 2] * al; a += src[i + 3];
+              n++;
+            }
+            const i = (y * w + x) * 4;
+            const al = a / n > 0.01 ? (a / n) / 255 : 1;
+            dst[i] = r / n / al;
+            dst[i + 1] = g / n / al;
+            dst[i + 2] = b / n / al;
+            dst[i + 3] = a / n;
+          }
+        }
+        return out;
+      },
+    },
+
+    "twirl": {
+      title: "Twirl",
+      params: [
+        { k: "angle", label: "Angle", min: -360, max: 360, step: 1, v: 120 },
+        { k: "radius", label: "Radius %", min: 10, max: 100, step: 1, v: 80 },
+      ],
+      fn(img, v) {
+        const w = img.width, h = img.height;
+        const src = new Uint8ClampedArray(img.data);
+        const dst = img.data;
+        const cx = w / 2, cy = h / 2;
+        const R = Math.min(w, h) / 2 * (v.radius / 100);
+        const maxAngle = v.angle * Math.PI / 180;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const rx = x - cx, ry = y - cy;
+            const r = Math.sqrt(rx * rx + ry * ry);
+            if (r >= R) continue;
+            const f = 1 - r / R;
+            const theta = maxAngle * f * f;
+            const cos = Math.cos(theta), sin = Math.sin(theta);
+            const sx = Utils.clamp(cx + rx * cos - ry * sin, 0, w - 1);
+            const sy = Utils.clamp(cy + rx * sin + ry * cos, 0, h - 1);
+            // bilinear sample
+            const x0 = Math.floor(sx), y0 = Math.floor(sy);
+            const x1 = Math.min(x0 + 1, w - 1), y1 = Math.min(y0 + 1, h - 1);
+            const fx = sx - x0, fy = sy - y0;
+            const di = (y * w + x) * 4;
+            for (let c = 0; c < 4; c++) {
+              const p00 = src[(y0 * w + x0) * 4 + c], p10 = src[(y0 * w + x1) * 4 + c];
+              const p01 = src[(y1 * w + x0) * 4 + c], p11 = src[(y1 * w + x1) * 4 + c];
+              dst[di + c] = (p00 * (1 - fx) + p10 * fx) * (1 - fy) + (p01 * (1 - fx) + p11 * fx) * fy;
+            }
+          }
         }
         return img;
       },

@@ -14,6 +14,10 @@
   // ---- pointer -----------------------------------------------------------
 
   canvas.addEventListener("pointerdown", (e) => {
+    if (document.querySelector(".context-menu")) {
+      UI.closeContextMenu();
+      return; // the click that dismisses the menu shouldn't also paint
+    }
     if (e.button !== 0 && e.button !== 1) return;
     canvas.setPointerCapture(e.pointerId);
     const s = Editor.clientToScreen(e.clientX, e.clientY);
@@ -42,7 +46,7 @@
     }
     if (pointerDown && Editor.doc) {
       Tools.move(p, e);
-    } else if (["brush", "eraser", "clone"].includes(Tools.current)) {
+    } else if (Tools.brushLike.includes(Tools.current)) {
       Editor.render(); // keep brush cursor circle tracking
     }
   });
@@ -65,7 +69,10 @@
     Editor.render();
   });
 
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    UI.openContextMenu(e.clientX, e.clientY);
+  });
 
   // ---- wheel zoom -----------------------------------------------------------
 
@@ -158,6 +165,7 @@
     const toolKeys = {
       v: "move", m: "select", c: "crop", b: "brush", e: "eraser",
       g: "fill", i: "eyedropper", t: "text", u: "shape", s: "clone", h: "hand",
+      k: "smudge", r: "blur", o: "dodge",
     };
     if (toolKeys[key]) { Tools.set(toolKeys[key]); return; }
 
@@ -167,7 +175,8 @@
         Editor.deleteSelectionContents();
         break;
       case "Escape":
-        if (Tools.current === "crop" && Tools.cropRect) Tools.cancelCrop();
+        if (document.querySelector(".context-menu")) UI.closeContextMenu();
+        else if (Tools.current === "crop" && Tools.cropRect) Tools.cancelCrop();
         else Editor.deselect();
         break;
       case "Enter":
