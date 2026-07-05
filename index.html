@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pixel — Browser Image Editor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header id="menubar">
+  <div id="logo">◧ Pixel</div>
+  <nav id="menus"></nav>
+  <div id="doc-title">Untitled</div>
+</header>
+
+<div id="tool-options"></div>
+
+<main id="workspace">
+  <aside id="toolbar"></aside>
+  <section id="canvas-wrap">
+    <canvas id="view"></canvas>
+  </section>
+  <aside id="sidebar">
+    <div class="panel-title">Layers</div>
+    <div id="layer-controls">
+      <select id="blend-mode" title="Blend mode">
+        <option value="source-over">Normal</option>
+        <option value="multiply">Multiply</option>
+        <option value="screen">Screen</option>
+        <option value="overlay">Overlay</option>
+        <option value="darken">Darken</option>
+        <option value="lighten">Lighten</option>
+        <option value="color-dodge">Color Dodge</option>
+        <option value="color-burn">Color Burn</option>
+        <option value="hard-light">Hard Light</option>
+        <option value="soft-light">Soft Light</option>
+        <option value="difference">Difference</option>
+        <option value="exclusion">Exclusion</option>
+        <option value="hue">Hue</option>
+        <option value="saturation">Saturation</option>
+        <option value="color">Color</option>
+        <option value="luminosity">Luminosity</option>
+      </select>
+      <div class="opacity-row">
+        <span>Opacity</span>
+        <input id="layer-opacity" type="range" min="0" max="100" value="100">
+        <span id="layer-opacity-val">100%</span>
+      </div>
+    </div>
+    <div id="layers"></div>
+    <div id="layer-buttons">
+      <button id="lb-add" title="New layer">+</button>
+      <button id="lb-dup" title="Duplicate layer">⧉</button>
+      <button id="lb-up" title="Move layer up">▲</button>
+      <button id="lb-down" title="Move layer down">▼</button>
+      <button id="lb-merge" title="Merge down">⤵</button>
+      <button id="lb-del" title="Delete layer">🗑</button>
+    </div>
+  </aside>
+</main>
+
+<footer id="statusbar">
+  <span id="status-doc"></span>
+  <span id="status-pos"></span>
+  <span id="status-hint"></span>
+  <span id="zoom-controls">
+    <button id="zoom-out" title="Zoom out">−</button>
+    <button id="zoom-level" title="Reset to 100%">100%</button>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-fit" title="Fit to screen">Fit</button>
+  </span>
+</footer>
+
+<input type="file" id="file-input" accept="image/*" multiple hidden>
+
+<!-- New document -->
+<dialog id="dlg-new">
+  <h3>New Image</h3>
+  <div class="dlg-body">
+    <label>Width <input type="number" id="new-width" value="1280" min="1" max="8000"> px</label>
+    <label>Height <input type="number" id="new-height" value="800" min="1" max="8000"> px</label>
+    <label>Background
+      <select id="new-bg">
+        <option value="#ffffff">White</option>
+        <option value="transparent">Transparent</option>
+        <option value="#000000">Black</option>
+      </select>
+    </label>
+  </div>
+  <menu>
+    <button type="button" id="new-open-image">Open image…</button>
+    <span class="spacer"></span>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="new-ok" class="primary">Create</button>
+  </menu>
+</dialog>
+
+<!-- Image size -->
+<dialog id="dlg-resize">
+  <h3>Image Size</h3>
+  <div class="dlg-body">
+    <label>Width <input type="number" id="rs-width" min="1" max="8000"> px</label>
+    <label>Height <input type="number" id="rs-height" min="1" max="8000"> px</label>
+    <label class="check"><input type="checkbox" id="rs-aspect" checked> Keep aspect ratio</label>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="rs-ok" class="primary">Resize</button>
+  </menu>
+</dialog>
+
+<!-- Canvas size -->
+<dialog id="dlg-canvas">
+  <h3>Canvas Size</h3>
+  <div class="dlg-body">
+    <label>Width <input type="number" id="cs-width" min="1" max="8000"> px</label>
+    <label>Height <input type="number" id="cs-height" min="1" max="8000"> px</label>
+    <p class="note">Content stays centered.</p>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="cs-ok" class="primary">Apply</button>
+  </menu>
+</dialog>
+
+<!-- Text -->
+<dialog id="dlg-text">
+  <h3>Add Text</h3>
+  <div class="dlg-body">
+    <textarea id="text-input" rows="3" placeholder="Your text…"></textarea>
+    <div class="row">
+      <label>Font
+        <select id="text-font">
+          <option>Arial</option>
+          <option>Verdana</option>
+          <option>Georgia</option>
+          <option>Times New Roman</option>
+          <option>Courier New</option>
+          <option>Impact</option>
+          <option>Comic Sans MS</option>
+        </select>
+      </label>
+      <label>Size <input type="number" id="text-size" value="48" min="6" max="500"></label>
+    </div>
+    <div class="row">
+      <label>Color <input type="color" id="text-color" value="#ffffff"></label>
+      <label class="check"><input type="checkbox" id="text-bold"> Bold</label>
+      <label class="check"><input type="checkbox" id="text-italic"> Italic</label>
+    </div>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="text-ok" class="primary">Add</button>
+  </menu>
+</dialog>
+
+<!-- Export -->
+<dialog id="dlg-export">
+  <h3>Export Image</h3>
+  <div class="dlg-body">
+    <label>Filename <input type="text" id="export-name" value="image"></label>
+    <label>Format
+      <select id="export-format">
+        <option value="image/png">PNG</option>
+        <option value="image/jpeg">JPEG</option>
+        <option value="image/webp">WebP</option>
+      </select>
+    </label>
+    <label id="export-quality-row">Quality
+      <input type="range" id="export-quality" min="1" max="100" value="90">
+      <span id="export-quality-val">90</span>
+    </label>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="export-ok" class="primary">Download</button>
+  </menu>
+</dialog>
+
+<!-- Save project -->
+<dialog id="dlg-save">
+  <h3>Save Project</h3>
+  <div class="dlg-body">
+    <label>Project name <input type="text" id="save-name" value="My project"></label>
+    <p class="note">Saved locally in your browser (IndexedDB). Nothing leaves your machine.</p>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Cancel</button>
+    <button type="button" id="save-ok" class="primary">Save</button>
+  </menu>
+</dialog>
+
+<!-- Projects -->
+<dialog id="dlg-projects">
+  <h3>Projects</h3>
+  <div class="dlg-body">
+    <div id="projects-list"></div>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel">Close</button>
+  </menu>
+</dialog>
+
+<!-- Parametric filter -->
+<dialog id="dlg-filter">
+  <h3 id="filter-title"></h3>
+  <div class="dlg-body" id="filter-params"></div>
+  <menu>
+    <button type="button" id="filter-cancel">Cancel</button>
+    <button type="button" id="filter-ok" class="primary">Apply</button>
+  </menu>
+</dialog>
+
+<!-- About -->
+<dialog id="dlg-about">
+  <h3>Pixel — shortcuts</h3>
+  <div class="dlg-body">
+    <table id="shortcuts">
+      <tr><td>V / M / C</td><td>Move / Select / Crop</td></tr>
+      <tr><td>B / E / G</td><td>Brush / Eraser / Fill</td></tr>
+      <tr><td>I / T / U / S / H</td><td>Eyedropper / Text / Shape / Clone / Hand</td></tr>
+      <tr><td>[ ]</td><td>Brush size</td></tr>
+      <tr><td>Ctrl+Z / Ctrl+Shift+Z</td><td>Undo / Redo</td></tr>
+      <tr><td>Ctrl+A / Ctrl+D / Del</td><td>Select all / Deselect / Delete selection</td></tr>
+      <tr><td>Ctrl+N / O / S / E</td><td>New / Open / Save / Export</td></tr>
+      <tr><td>Space+drag, wheel</td><td>Pan, zoom</td></tr>
+      <tr><td>+ / − / 0 / 1</td><td>Zoom in / out / fit / 100%</td></tr>
+      <tr><td>Alt+click (Clone)</td><td>Set clone source</td></tr>
+    </table>
+    <p class="note">Everything runs locally in your browser. No accounts, no cloud.</p>
+  </div>
+  <menu>
+    <button type="button" class="dlg-cancel primary">Close</button>
+  </menu>
+</dialog>
+
+<script src="js/utils.js"></script>
+<script src="js/history.js"></script>
+<script src="js/filters.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

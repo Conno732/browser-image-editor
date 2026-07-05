@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>boot test</title>
+<link rel="stylesheet" href="css/style.css">
+<script>
+window.__errors = [];
+window.onerror = function (msg, src, line, col) {
+  window.__errors.push(msg + " @ " + src + ":" + line + ":" + col);
+  return false;
+};
+</script>
+</head>
+<body>
+<header id="menubar"><div id="logo">◧</div><nav id="menus"></nav><div id="doc-title"></div></header>
+<div id="tool-options"></div>
+<main id="workspace">
+  <aside id="toolbar"></aside>
+  <section id="canvas-wrap"><canvas id="view"></canvas></section>
+  <aside id="sidebar">
+    <div id="layer-controls">
+      <select id="blend-mode"><option value="source-over">Normal</option></select>
+      <input id="layer-opacity" type="range" min="0" max="100" value="100">
+      <span id="layer-opacity-val"></span>
+    </div>
+    <div id="layers"></div>
+    <div id="layer-buttons">
+      <button id="lb-add"></button><button id="lb-dup"></button><button id="lb-up"></button>
+      <button id="lb-down"></button><button id="lb-merge"></button><button id="lb-del"></button>
+    </div>
+  </aside>
+</main>
+<footer id="statusbar">
+  <span id="status-doc"></span><span id="status-pos"></span><span id="status-hint"></span>
+  <span id="zoom-controls">
+    <button id="zoom-out"></button><button id="zoom-level"></button>
+    <button id="zoom-in"></button><button id="zoom-fit"></button>
+  </span>
+</footer>
+<input type="file" id="file-input" hidden>
+<dialog id="dlg-new"><input id="new-width"><input id="new-height"><select id="new-bg"></select>
+  <button class="dlg-cancel"></button><button id="new-ok"></button><button id="new-open-image"></button></dialog>
+<dialog id="dlg-resize"><input id="rs-width"><input id="rs-height"><input type="checkbox" id="rs-aspect">
+  <button class="dlg-cancel"></button><button id="rs-ok"></button></dialog>
+<dialog id="dlg-canvas"><input id="cs-width"><input id="cs-height">
+  <button class="dlg-cancel"></button><button id="cs-ok"></button></dialog>
+<dialog id="dlg-text"><textarea id="text-input"></textarea><select id="text-font"></select>
+  <input id="text-size"><input id="text-color" type="color"><input id="text-bold" type="checkbox">
+  <input id="text-italic" type="checkbox"><button class="dlg-cancel"></button><button id="text-ok"></button></dialog>
+<dialog id="dlg-export"><input id="export-name"><select id="export-format"><option value="image/png">PNG</option></select>
+  <label id="export-quality-row"><input id="export-quality" type="range"><span id="export-quality-val"></span></label>
+  <button class="dlg-cancel"></button><button id="export-ok"></button></dialog>
+<dialog id="dlg-save"><input id="save-name"><button class="dlg-cancel"></button><button id="save-ok"></button></dialog>
+<dialog id="dlg-projects"><div id="projects-list"></div><button class="dlg-cancel"></button></dialog>
+<dialog id="dlg-filter"><h3 id="filter-title"></h3><div id="filter-params"></div>
+  <button id="filter-cancel"></button><button id="filter-ok"></button></dialog>
+<dialog id="dlg-about"><button class="dlg-cancel"></button></dialog>
+
+<script src="js/utils.js"></script>
+<script src="js/history.js"></script>
+<script src="js/filters.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+<script>
+// Exercise the core paths headlessly, then report into the DOM.
+(function () {
+  const results = [];
+  const check = (name, fn) => {
+    try {
+      const v = fn();
+      results.push((v === false ? "FAIL " : "PASS ") + name);
+    } catch (err) {
+      results.push("FAIL " + name + " — " + err.message);
+    }
+  };
+
+  check("doc created", () => Editor.doc && Editor.doc.width === 1280 && Editor.doc.layers.length === 1);
+  check("toolbar built", () => document.querySelectorAll(".tool-btn").length === 11);
+  check("menus built", () => document.querySelectorAll(".menu").length === 7);
+  check("add layer", () => { Editor.addLayer(); return Editor.doc.layers.length === 2; });
+  check("brush stroke", () => {
+    Tools.set("brush");
+    Tools.down({ x: 100, y: 100 }, { altKey: false });
+    Tools.move({ x: 200, y: 180 }, {});
+    Tools.up({ x: 200, y: 180 }, {});
+    const d = Editor.activeLayer().ctx.getImageData(150, 140, 1, 1).data;
+    return d[3] > 0;
+  });
+  check("undo brush", () => {
+    History.undo();
+    const d = Editor.activeLayer().ctx.getImageData(150, 140, 1, 1).data;
+    return d[3] === 0;
+  });
+  check("redo brush", () => {
+    History.redo();
+    const d = Editor.activeLayer().ctx.getImageData(150, 140, 1, 1).data;
+    return d[3] > 0;
+  });
+  check("selection + delete", () => {
+    Editor.selection = { x: 90, y: 90, w: 200, h: 200 };
+    Editor.deleteSelectionContents();
+    const d = Editor.activeLayer().ctx.getImageData(150, 140, 1, 1).data;
+    Editor.deselect();
+    return d[3] === 0;
+  });
+  check("flood fill", () => {
+    Tools.color = "#00ff00";
+    Filters.floodFill(Editor.activeLayer(), 500, 500, "#00ff00", 30, null);
+    const d = Editor.activeLayer().ctx.getImageData(500, 500, 1, 1).data;
+    return d[1] === 255;
+  });
+  check("brightness filter", () => {
+    const layer = Editor.doc.layers[0]; // white background
+    const img = layer.ctx.getImageData(0, 0, 10, 10);
+    const out = Filters.defs["brightness-contrast"].fn(img, { brightness: -50, contrast: 0 });
+    return out.data[0] < 255 && out.data[0] > 100;
+  });
+  check("gaussian blur", () => {
+    const img = new ImageData(20, 20);
+    for (let i = 0; i < img.data.length; i += 4) { img.data[i + 3] = 255; }
+    img.data[(10 * 20 + 10) * 4] = 255;
+    Filters.gaussianBlur(img, 3);
+    return img.data[(10 * 20 + 9) * 4] > 0; // spread to neighbor
+  });
+  check("hsl roundtrip", () => {
+    const [h, s, l] = Utils.rgbToHsl(200, 100, 50);
+    const [r, g, b] = Utils.hslToRgb(h, s, l);
+    return Math.abs(r - 200) <= 2 && Math.abs(g - 100) <= 2 && Math.abs(b - 50) <= 2;
+  });
+  check("crop", () => {
+    Editor.cropTo({ x: 100, y: 100, w: 300, h: 200 });
+    return Editor.doc.width === 300 && Editor.doc.height === 200;
+  });
+  check("rotate 90", () => {
+    Editor.rotate(90);
+    return Editor.doc.width === 200 && Editor.doc.height === 300;
+  });
+  check("merge down", () => {
+    Editor.doc.active = 1;
+    Editor.mergeDown();
+    return Editor.doc.layers.length === 1;
+  });
+  check("flatten export", () => {
+    const c = Editor.flattenToCanvas();
+    return c.width === Editor.doc.width && c.toDataURL("image/png").length > 100;
+  });
+  check("text layer", () => {
+    Editor.addTextLayer({ x: 20, y: 100 }, { text: "Hi", size: 48, family: "Arial", color: "#000000", bold: false, italic: false });
+    return Editor.doc.layers.length === 2 && Editor.activeLayer().name === "Hi";
+  });
+
+  const div = document.createElement("div");
+  div.id = "test-results";
+  div.textContent = "ERRORS:[" + window.__errors.join(" | ") + "] " + results.join(" ;; ");
+  document.body.appendChild(div);
+})();
+</script>
+</body>
+</html>
